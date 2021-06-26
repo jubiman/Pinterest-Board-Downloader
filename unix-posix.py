@@ -134,9 +134,9 @@ def save(file, name, ext):
 		print(f'Do you want to overwrite {name + ext}? y/n\t')
 		while 1:
 			k = getch()
-			if k in [b'n', b'N']:
+			if k in ['n', 'N']:
 				return
-			elif k in [b'y', b'Y']:
+			elif k in ['y', 'Y']:
 				break
 	with open(options['FOLDERS']['saves'] + '/' + name + ext, 'wb') as f:
 		f.write(file)
@@ -426,20 +426,20 @@ def showSettings():
 	print("\t\nESC. Return to console")
 
 	k = getch()
-	if k == b"1":
+	if k == "1":
 		return showFilenames()
-	elif k == b"2":
+	elif k == "2":
 		return showMultithreading()
-	elif k == b"3":
+	elif k == "3":
 		return showFolders()
-	elif k == b"4":
+	elif k == "4":
 		return showDuplicates()
-	elif k == b"5":
+	elif k == "5":
 		print("Are you sure you want to reset to defaults? y/n")
 		k = getch()
-		if k in [b'y', b'Y']:
+		if k in ['y', 'Y']:
 			configDefaults()
-	elif k == b"\x08" or k == b"\x1b":
+	elif k == "\x08" or k == "\x1b":
 		cls()
 		return saveConfig()
 	return showSettings()
@@ -453,12 +453,12 @@ def showFilenames():
 		print(f"\t2. Custom file name\033[40G| [{options['FILENAMES']['customFileName']}]")
 		print("\tESC. Back to main menu")
 		k = getch()
-		if k == b"1":
+		if k == "1":
 			options['FILENAMES']['customFileNames'] = str(not strtobool(options['FILENAMES']['customFileNames']))
-		elif k == b"2":
+		elif k == "2":
 			val = input("New value:  ")
 			options['FILENAMES']['customFileName'] = val
-		elif k == b"\x08" or k == b"\x1b":
+		elif k == "\x08" or k == "\x1b":
 			cls()
 			return showSettings()
 		return showFilenames()
@@ -471,10 +471,10 @@ def showMultithreading():
 		print(f"\t1. Max workers (threads)\033[40G| [{options['MULTITHREADING']['mx_wrks']}]")
 		print("\tESC. Back to main menu")
 		k = getch()
-		if k == b"1":
+		if k == "1":
 			val = input("New value:  ")
 			options['MULTITHREADING']['mx_wrks'] = val
-		elif k == b"\x08" or k == b"\x1b":
+		elif k == "\x08" or k == "\x1b":
 			cls()
 			return showSettings()
 		return showMultithreading()
@@ -487,10 +487,10 @@ def showFolders():
 		print(f"\t1. Download folder\033[40G| [{options['FOLDERS']['saves']}]")
 		print("\tESC. Back to main menu")
 		k = getch()
-		if k == b"1":
+		if k == "1":
 			options['FOLDERS']['saves'] = filedialog.askdirectory(title="Select a local folder where you want to put "
 																		"all the pinned pictures")
-		elif k == b"\x08" or k == b"\x1b":
+		elif k == "\x08" or k == "\x1b":
 			cls()
 			return showSettings()
 		return showFolders()
@@ -504,11 +504,11 @@ def showDuplicates():
 		print(f"\t2. Save pin ID\033[40G| [{options['DUPLICATES']['savepinid']}]")
 		print("\tESC. Back to main menu")
 		k = getch()
-		if k == b"1":
+		if k == "1":
 			options['DUPLICATES']['checkforduplicates'] = str(not strtobool(options['DUPLICATES']['checkforduplicates']))
-		if k == b"2":
+		if k == "2":
 			options['DUPLICATES']['savepinid'] = str(not strtobool(options['DUPLICATES']['savepinid']))
-		elif k == b"\x08" or k == b"\x1b":
+		elif k == "\x08" or k == "\x1b":
 			cls()
 			return showSettings()
 		return showDuplicates()
