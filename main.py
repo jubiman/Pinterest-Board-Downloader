@@ -23,6 +23,8 @@ images = []
 options = ConfigParser()
 debug = force = verbose = False
 cls = lambda: os.system('cls' if os.name in ('nt', 'dos') else 'clear')
+pinids = []
+popup = True
 
 
 class ImageData:
@@ -40,6 +42,7 @@ def configDefaults():
 	options['FOLDERS']['saves'] = "./downloads"
 	options['DUPLICATES']['checkforduplicates'] = "True"
 	options['DUPLICATES']['savepinid'] = "True"
+	options['DUPLICATES']['mode'] = "speed"
 
 	saveConfig()
 
@@ -151,7 +154,7 @@ def getImgPropsSpecial(pin):
 					vDimens.sort(key=int)
 					img_url = vDimensD[int(vDimens[-1])]
 			else:
-				img_url = pin["images"]["orig"]["url"]
+				img_url = obj["images"]["orig"]["url"]
 			try:
 				name = dateConversion(js["resourceResponses"][0]["response"]["data"]["created_at"])
 			except:
@@ -338,15 +341,23 @@ def request(board):
 					f.close()
 
 			if strtobool(options["DUPLICATES"]["checkforduplicates"]):
-				with open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "r") as f:
-					if pin["id"] in f.read():
+				if options["DUPLICATES"]["mode"] == "speed":
+					if pin["id"] in pinids:
 						if verbose or debug:
 							print(f"Skipping duplicate {pin['id']}")
 						continue
+				else:
+					with open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "r") as f:
+						if pin["id"] in f.read().splitlines():
+							if verbose or debug:
+								print(f"Skipping duplicate {pin['id']}")
+							f.close()
+							continue
+						f.close()
 
 			if strtobool(options["DUPLICATES"]["savepinid"]):
-				with open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "w+") as f:
-					if pin["id"] not in f.read():
+				with open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "r+") as f:
+					if pin["id"] not in f.read().splitlines():
 						f.write(pin["id"])
 						f.write("\n")
 						f.close()
@@ -363,7 +374,7 @@ def request(board):
 			# The function failed to execute
 			print(task.result())
 	end = time.time()
-	print(f"Finished generating {len(pins)} images. Took {datetime.timedelta(seconds=end-start)}")
+	print(f"Finished generating {len(pins)} images: generated {len(images)} images. Took {datetime.timedelta(seconds=end-start)}")
 
 	print(f"Downloading {len(images)} images...")
 	start = time.time()
@@ -472,8 +483,14 @@ def showDuplicates():
 		k = getch()
 		if k == b"1":
 			options['DUPLICATES']['checkforduplicates'] = str(not strtobool(options['DUPLICATES']['checkforduplicates']))
-		if k == b"2":
+		elif k == b"2":
 			options['DUPLICATES']['savepinid'] = str(not strtobool(options['DUPLICATES']['savepinid']))
+		elif k == b"3":
+			if options['DUPLICATES']['mode'] == "speed":
+				options['DUPLICATES']['mode'] = "memory"
+				return showDuplicates()
+			options['DUPLICATES']['mode'] = "speed"
+			return showDuplicates()
 		elif k == b"\x08" or k == b"\x1b":
 			cls()
 			return showSettings()
@@ -484,6 +501,9 @@ def run():
 	global debug
 	global force
 	global verbose
+	global pinids
+	global popup
+	global images
 	while True:
 		inp = input("$>")
 		# inp = "dl https://pinterest.com/humanAF/art-n-stuff/ -f"  # DEBUG
@@ -495,24 +515,31 @@ def run():
 		if s[0] in ["download", 'dl']:
 			url = s[1]
 			try:
-				opts, args = getopt.getopt(s[2:], 'dfv', ["debug=", "force", "verbose"])
+				opts, args = getopt.getopt(s[2:], 'dfvn', ["debug", "force", "verbose", "no-dir"])
 			except getopt.GetoptError as err:
 				print(err)
 				continue
 			for o, a in opts:
 				if o == '--force':
-					force = a
+					force = True
 				elif o == '-f':
 					force = True
-					print('yes')
 				if o == '--debug':
-					debug = a
+					debug = True
 				elif o == '-d':
 					debug = True
 				if o == '--verbose':
-					verbose = a
+					verbose = True
 				elif o == '-v':
 					verbose = True
+				if o == '-n':
+					popup = False
+				elif o == '--no-dir':
+					popup = False
+
+			if popup:
+				options['FOLDERS']['saves'] = filedialog.askdirectory(
+					title="Select a local folder where you want to put all the pinned pictures")
 
 			# TODO: add more stuff?
 			print(f"Starting operation: downloading board from {url}.\n\tArguments:\n\t\t-f FORCE {force}\n\t\t-d DEBUG {debug}"
@@ -520,8 +547,15 @@ def run():
 					f"\n\t\tDownload folder:\t{options['FOLDERS']['saves']}\n\t\tMax threads:\t\t{options['MULTITHREADING']['mx_wrks']}"
 					f"\n\t\tCustom filenames:\t{options['FILENAMES']['customfilenames']}")
 			if strtobool(options["DUPLICATES"]["savepinid"]):
-				with open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "w") as f:
+				open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "a").close()
+			if options["DUPLICATES"]["mode"] == "speed":
+				with open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "r") as f:
+					pinids = f.read().splitlines()
 					f.close()
+			saveConfig()
+
+			images = []
+
 			gstart = time.time()
 			try:
 				request(url)
@@ -538,13 +572,13 @@ def main():
 	loadConfig()
 
 	try:
-		opts, args = getopt.getopt(sys.argv[1:], 'd', ["debug="])
+		opts, args = getopt.getopt(sys.argv[1:], 'd', ["debug"])
 	except getopt.GetoptError as err:
 		print(err)
 		sys.exit()
 	for o, a in opts:
 		if o == '--debug':
-			debug = a
+			debug = True
 		elif o == '-d':
 			debug = True
 
