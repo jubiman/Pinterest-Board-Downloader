@@ -479,6 +479,7 @@ def showDuplicates():
 		print("Pinterest Board Downloader Settings\n")
 		print(f"\t1. Check for duplicates\033[40G| [{options['DUPLICATES']['checkforduplicates']}]")
 		print(f"\t2. Save pin ID\033[40G| [{options['DUPLICATES']['savepinid']}]")
+		print(f"\t3. Efficiency mode\033[40G| [{options['DUPLICATES']['mode']}]")
 		print("\tESC. Back to main menu")
 		k = getch()
 		if k == "1":
