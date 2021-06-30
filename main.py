@@ -99,36 +99,6 @@ def dateConversion(date):
 	return name
 
 
-def parseNameStr(js, inp):
-	# TODO: add more options
-	name = ""
-
-	# tokenise the string
-	currentToken: str = ""
-	jsonAttribute = False
-
-	for i, it in enumerate(inp):
-		# @ indicates an option (in JSON object) from response > data > @attribute
-		if it == "@":
-			jsonAttribute = True
-		else:
-			currentToken += it
-
-	if jsonAttribute:
-		att = js[currentToken]
-		t = list(att[5:25])
-		t[2] = t[6] = '-'
-		a = "".join(t[0:11]).split('-')
-		month = datetime.datetime.strptime(a[1], "%b").month
-		if month < 10:
-			month = '0' + str(month)
-		a[1] = month
-		a = a[::-1]
-		a = ['-' + b for b in a]
-		name += "".join(list(a[0][1:]) + a[1:] + t[11:])
-	return name
-
-
 def save(file, name, ext):
 	if os.path.isfile(options['FOLDERS']['saves'] + '/' + name + ext) and not force:
 		print(f'Do you want to overwrite {name + ext}? y/n\t')
@@ -141,39 +111,6 @@ def save(file, name, ext):
 	with open(options['FOLDERS']['saves'] + '/' + name + ext, 'wb') as f:
 		f.write(file)
 		f.close()
-
-
-def requestImg(pin):
-	try:
-		while 1:
-			try:
-				p = requests.get(f'https://pinterest.com{pin}')
-
-				script = html.fromstring(p.content).xpath('//script[@id="initial-state"]')
-				js = json.loads(script[0].text)
-				break
-			except IndexError:
-				print('Failed to get pin information. Retry after 5 seconds...')
-				time.sleep(5)
-
-		img_url = js["resourceResponses"][0]["response"]["data"]["images"]["orig"]["url"]
-		if options["customFileNames"]:
-			if options["customFileName"] != "":
-				name = parseName(js["resourceResponses"][0]["response"]["data"])
-			elif js["resourceResponses"][0]["response"]["data"]["rich_metadata"] is None:
-				if options["emptyFileName"] != "":
-					name = options["emptyFileName"]
-				else:
-					name = img_url[img_url.rfind('/') + 1:img_url.rfind('.')]
-			else:
-				name = js["resourceResponses"][0]["response"]["data"]["rich_metadata"]["title"]
-		else:
-			name = js["resourceResponses"][0]["response"]["data"]["rich_metadata"]["title"]
-		ext = img_url[img_url.rfind('.'):]
-
-		return img_url, name, ext
-	except requests.exceptions.RequestException as e:
-		return e
 
 
 def downloadImg(url, name, ext):
@@ -200,7 +137,21 @@ def getImgPropsSpecial(pin):
 					f.write(json.dumps(js, indent=4, sort_keys=False))
 					f.close()
 
-			img_url = obj["images"]["orig"]["url"]
+			img_url = ""
+			if ('videos' in js["resourceResponses"][0]["response"]["data"]) and \
+				js["resourceResponses"][0]["response"]["data"]['videos']:
+				v_d = js["resourceResponses"][0]["response"]["data"]['videos']['video_list']
+				vDimens = []
+				vDimensD = {}
+				for v_format, v_v in v_d.items():
+					if 'url' in v_v and v_v['url'].endswith('mp4'):
+						vDimens.append(v_v['width'])
+						vDimensD[v_v['width']] = v_v['url']
+				if vDimens:
+					vDimens.sort(key=int)
+					img_url = vDimensD[int(vDimens[-1])]
+			else:
+				img_url = pin["images"]["orig"]["url"]
 			try:
 				name = dateConversion(js["resourceResponses"][0]["response"]["data"]["created_at"])
 			except:
@@ -239,11 +190,26 @@ def getImgProps(pin):
 			f.write(json.dumps(js, indent=4, sort_keys=False))
 			f.close()
 
-	img_url = pin["images"]["orig"]["url"]
+	img_url = ""
+	if ('videos' in js["resourceResponses"][0]["response"]["data"]) and \
+		js["resourceResponses"][0]["response"]["data"]['videos']:
+		v_d = js["resourceResponses"][0]["response"]["data"]['videos']['video_list']
+		vDimens = []
+		vDimensD = {}
+		for v_format, v_v in v_d.items():
+			if 'url' in v_v and v_v['url'].endswith('mp4'):
+				vDimens.append(v_v['width'])
+				vDimensD[v_v['width']] = v_v['url']
+		if vDimens:
+			vDimens.sort(key=int)
+			img_url = vDimensD[int(vDimens[-1])]
+	else:
+		img_url = pin["images"]["orig"]["url"]
 	try:
 		name = dateConversion(js["resourceResponses"][0]["response"]["data"]["created_at"])  # ????? not works on 1 fsr
 	except:
 		try:
+			name = js["resourceResponses"][0]["response"]["data"]["id"]
 			name = js["resourceResponses"][0]["response"]["data"]["id"]
 		except:
 			name = str(randint(0, 1024))
@@ -283,7 +249,7 @@ def request(board):
 	url = 'https://pinterest.com/resource/BoardFeedResource/get/'
 	bookmark = js["resourceResponses"][1]["options"]["bookmarks"][0]
 
-	pins = js["resourceResponses"][1]["response"]["data"]
+	pins = js["resourceResponses"][1]["response"]["data"][1:]
 	s = requests.Session()
 	s.headers = {
 		'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.0.0 Safari/537.36',
@@ -564,7 +530,7 @@ def run():
 			# except Exception as ex:
 				# print(f"Something failed: {ex}")
 			gend = time.time()
-			print(f"Took {datetime.timedelta(seconds=gend - gstart)} seconds.")
+			print(f"\nFinished operation! Took {datetime.timedelta(seconds=gend - gstart)} seconds.")
 
 
 def main():
