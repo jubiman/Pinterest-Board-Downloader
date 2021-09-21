@@ -1,3 +1,4 @@
+import asyncio
 import os
 import json
 import datetime
@@ -8,9 +9,11 @@ from configparser import ConfigParser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from distutils.util import strtobool
 from random import randint
+from traceback import print_exc
 
 from getch import getch
 
+import httpx
 import requests
 from lxml import html
 from tkinter import filedialog
@@ -43,12 +46,38 @@ def configDefaults():
 	options['DUPLICATES']['checkforduplicates'] = "True"
 	options['DUPLICATES']['savepinid'] = "True"
 	options['DUPLICATES']['mode'] = "speed"
+	options['DEBUG']['autologerrors'] = "False"
+	options['DEBUG']['autoenabledebug'] = "False"
 
 	saveConfig()
 
 
 def loadConfig():
+	global debug
 	options.read('config.ini')
+	if "DEBUG" not in options:
+		options['DEBUG'] = {}
+		options['DEBUG']['autologerrors'] = "False"
+		options['DEBUG']['autoenabledebug'] = "False"
+	elif "FILENAMES" not in options:
+		options['FILENAMES'] = {}
+		options['FILENAMES']['customFileNames'] = 'True'
+		options['FILENAMES']['customFileName'] = '@created_at'
+		options['FILENAMES']['emptyFileName'] = ""
+	elif "MULTITHREADING" not in options:
+		options['MULTITHREADING'] = {}
+		options['MULTITHREADING']['mx_wrks'] = '0'
+	elif "FOLDERS" not in options:
+		options['FOLDERS'] = {}
+		options['FOLDERS']['saves'] = "./downloads"
+	elif "DUPLICATES" not in options:
+		options['DUPLICATES'] = {}
+		options['DUPLICATES']['checkforduplicates'] = "True"
+		options['DUPLICATES']['savepinid'] = "True"
+		options['DUPLICATES']['mode'] = "speed"
+
+	if strtobool(options['DEBUG']['autoenabledebug']):
+		debug = True
 
 
 def saveConfig():
@@ -106,19 +135,18 @@ def save(file, name, ext):
 	if os.path.isfile(options['FOLDERS']['saves'] + '/' + name + ext) and not force:
 		print(f'Do you want to overwrite {name + ext}? y/n\t')
 		while 1:
-			k = getch()
-			if k in [b'n', b'N']:
+			k = ord(getch())
+			if k in [ord('n'), ord('N')]:
 				return
-			elif k in [b'y', b'Y']:
+			elif k in [ord('y'), ord('Y')]:
 				break
 	with open(options['FOLDERS']['saves'] + '/' + name + ext, 'wb') as f:
 		f.write(file)
 		f.close()
 
 
-def downloadImg(url, name, ext, iden):
+def downloadImg(img, name, ext, iden):
 	# TODO: add options
-	img = requests.get(url).content
 	save(img, name, ext)
 	if strtobool(options["DUPLICATES"]["savepinid"]):
 		with open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "r+") as f:
@@ -200,8 +228,7 @@ def getImgProps(pin):
 			f.close()
 
 	img_url = ""
-	if ('videos' in js["resourceResponses"][0]["response"]["data"]) and \
-		js["resourceResponses"][0]["response"]["data"]['videos']:
+	if ('videos' in js["resourceResponses"][0]["response"]["data"]) and js["resourceResponses"][0]["response"]["data"]['videos']:
 		v_d = js["resourceResponses"][0]["response"]["data"]['videos']['video_list']
 		vDimens = []
 		vDimensD = {}
@@ -231,9 +258,20 @@ def getImgProps(pin):
 	return img_url, name, ext, pin["id"]
 
 
-def request(board):
+async def dl(max_workers, reqs, tasks_list):
+	downloaded = 0
+	with ThreadPoolExecutor(max_workers=max_workers) as ex:
+		for i, req in enumerate(reqs):
+			threads["download"].append(ex.submit(downloadImg, req.content, tasks_list[i][1], tasks_list[i][2], tasks_list[i][3]))
+
+		for _ in as_completed(threads["download"]):
+			downloaded += 1
+	return downloaded
+
+
+async def request(board):
 	if 'pinterest.com' in board:
-		if 'https://' in board:
+		if 'https://' in board or 'http://' in board:
 			source_url = board[board.find('/', 10):]
 		else:
 			source_url = board[board.find('/'):]
@@ -248,16 +286,17 @@ def request(board):
 		page = requests.get(f"https://pinterest.com{source_url}")
 		script = html.fromstring(page.content).xpath('//script[@id="initial-state"]')
 		js = json.loads(script[0].text)
-		board_id = js["resourceResponses"][0]["response"]["data"]["id"]
+		board_id = js["boards"][list(js["boards"])[0]]["id"]
 		timestamp = int(time.time() * 1000)
-	except:
+	except Exception as e:
 		print("Failed to get board information. Exitting.")
+		print_exc(chain=False)
 		return
 
 	url = 'https://pinterest.com/resource/BoardFeedResource/get/'
-	bookmark = js["resourceResponses"][1]["options"]["bookmarks"][0]
+	bookmark = js["resources"]["BoardFeedResource"][list(js["resources"]["BoardFeedResource"])[0]]["nextBookmark"]
+	pins = js["resources"]["BoardFeedResource"][list(js["resources"]["BoardFeedResource"])[0]]["data"]
 
-	pins = js["resourceResponses"][1]["response"]["data"][1:]
 	s = requests.Session()
 	s.headers = {
 		'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.0.0 Safari/537.36',
@@ -308,8 +347,8 @@ def request(board):
 		}
 		try:
 			p = s.get(url, params=params)
-		except requests.exceptions.RequestException as ex:
-			print(ex.with_traceback())
+		except requests.exceptions.RequestException:
+			print_exc(chain=False)
 			return
 
 		# DEBUG
@@ -330,68 +369,131 @@ def request(board):
 	print(f"Generating {len(pins)} images...")
 	start = time.time()
 
+	# Generate images (with a generator obeject)
 	max_workers = None if int(options['MULTITHREADING']['mx_wrks']) == 0 else int(options['MULTITHREADING']['mx_wrks'])
+	images, errors = await multithread(pins)
 
 	# Multi-threading
-	images = multithread(max_workers, pins)
-	generated = 0
-
-	# Multi-threading
-	downloaded = 0
-	with ThreadPoolExecutor(max_workers=max_workers) as ex:
-		print(f"Downloading images...")
+	async with httpx.AsyncClient() as client:
+		print(f"Downloading {len(pins)} images...")
 		start2 = time.time()
-		for image in images:
-			generated += 1
-			threads["download"].append(ex.submit(downloadImg, image.url, image.name, image.ext, image.id))
+		tasks = ((client.get(image.url), image.name, image.ext, image.id) for image in images)
+		# task2 = []
+		# for image in images:
+		# 	task2.append((image.name, image.ext, image.id))
 
-		for _ in as_completed(threads["download"]):
-			downloaded += 1
-		end2 = time.time()
-		print(f"Finished downloading {downloaded} images. Took {datetime.timedelta(seconds=end2 - start2)}")
-	end = time.time()
-	print(f"Finished generating {len(pins)} images: generated {generated} images. Took {datetime.timedelta(seconds=end-start)}")
+		reqs = await asyncio.gather(*(list(zip(*(tasks_list := list(tasks))))[0]))
+		generated = len(reqs)
+		end = time.time()
+		print(f"Finished generating {len(pins)} images: generated {generated} images (Skipped {len(pins)-generated} with {errors} errors). Took {datetime.timedelta(seconds=end-start)}")
+		downloaded = await dl(max_workers, reqs, tasks_list)
+		end = time.time()
+		print(f"Finished downloading {downloaded} images. Took {datetime.timedelta(seconds=end-start2)}")
 
 
-def multithread(max_workers, pins):
-	with ThreadPoolExecutor(max_workers=max_workers) as ex:
-		# Go through each pin
-		for pin in pins:
-			if pin is None:
-				continue
+async def multithread(pins):
+	# with ThreadPoolExecutor(max_workers=max_workers) as ex:
+	normal = special = []
+	errors = 0
+	# Go through each pin
+	for pin in pins:
+		if pin is None:
+			continue
 
-			if debug:
-				with open("json_logs2.json", "a") as f:
-					f.write(json.dumps(pin, indent=4))
-					f.write("\n\n")
-					f.close()
+		if debug:
+			with open("json_logs2.json", "a+") as f:
+				f.write(json.dumps(pin, indent=4, sort_keys=True))
+				f.write("\n\n")
 
-			if strtobool(options["DUPLICATES"]["checkforduplicates"]):
-				if options["DUPLICATES"]["mode"] == "speed":
-					if pin["id"] in pinids:
+		if strtobool(options["DUPLICATES"]["checkforduplicates"]):
+			if options["DUPLICATES"]["mode"] == "speed":
+				if pin["id"] in pinids:
+					if verbose or debug:
+						print(f"Skipping duplicate {pin['id']}")
+					continue
+			else:
+				with open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "r") as f:
+					if pin["id"] in f.read().splitlines():
 						if verbose or debug:
 							print(f"Skipping duplicate {pin['id']}")
 						continue
-				else:
-					with open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "r") as f:
-						if pin["id"] in f.read().splitlines():
-							if verbose or debug:
-								print(f"Skipping duplicate {pin['id']}")
-							f.close()
-							continue
-						f.close()
 
-			threads["imgprops"].append(ex.submit(getImgProps, pin))
+		if pin['type'] != 'pin':
+			special.append(pin["id"])
+		elif pin["type"] == "pin":
+			normal.append(pin["id"])
+		else:
+			print(f"wtf?? {pin['type']=}")
 
-		for task in as_completed(threads["imgprops"]):
-			# If the function returned successfully we can download the image
-			if isinstance(task.result(), tuple):
+	imgs = []
+	async with httpx.AsyncClient() as client:
+		tasks = (client.get(f"https://pinterest.com/pin/{pinid}", follow_redirects=True) for pinid in normal)
+		pin_pages = await asyncio.gather(*tasks)
+
+		for pin_page in pin_pages:
+			script = html.fromstring(pin_page.content).xpath('//script[@id="initial-state"]')
+			js = json.loads(script[0].text)
+
+			with open("z.json", "w") as f:
+				f.write(json.dumps(js, indent=4, sort_keys=not not 1))
+			img_url = ""
+			if js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["error"] is not None:
 				if debug:
-					print(task.result()[0], task.result()[1] + task.result()[2], task.result()[3])
-				yield ImageData(*task.result())
-				continue  # Don't know if this is needed but will still do it
-			# The function failed to execute
-			print(task.result())
+					with open("wtf.json", "w") as f:
+						f.write(json.dumps(js, indent=4, sort_keys=True))
+				if strtobool(options['DEBUG']['autologerrors']) or debug:
+					with open("error_logs.json", "a+", encoding="utf-8") as f:
+						msg = js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["error"]["message"][js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["error"]["message"].find('"')+1:]
+						msg = msg.replace('\\"', '"')
+						msg = msg.replace('\\\\', '\\')
+						try:
+							js2 = json.loads(msg[:-1])
+						except:
+							print("Got an error while trying to load the error. Dumping json object to error_logs_error.json")
+							with open("error_logs_error.json", "a+") as f2:
+								f2.write(json.dumps(js, indent=4, sort_keys=True))
+						f.write(json.dumps(js2, indent=4, sort_keys=True, ensure_ascii=False))
+					print(f'Got an error while requesting {js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["error"]["path"]}.'
+							f'\n{js2["code"]} - {js2["message"]}'
+							f'\nWrote the message object to error_logs.json')
+					errors += 1
+				continue
+			if ('videos' in js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["data"]) and js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["data"]['videos']:
+				if debug:
+					with open("video.json", "w") as f:
+						f.write(json.dumps(js, indent=4, sort_keys=True))
+				v_d = js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["data"]['videos']['video_list']
+				vDimens = []
+				vDimensD = {}
+				for v_format, v_v in v_d.items():
+					if 'url' in v_v and v_v['url'].endswith('mp4'):
+						vDimens.append(v_v['width'])
+						vDimensD[v_v['width']] = v_v['url']
+				if vDimens:
+					vDimens.sort(key=int)
+					img_url = vDimensD[int(vDimens[-1])]
+			else:
+				if debug:
+					with open("x.json", "w") as f:
+						f.write(json.dumps(js, indent=4, sort_keys=True))
+				img_url = js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["data"]["images"]["orig"]["url"]
+			try:
+				name = dateConversion(
+					js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["data"]["created_at"])  # ????? not works on 1 fsr
+			except:
+				try:
+					name = js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["data"]["id"]
+				except:
+					name = str(randint(0, 1024))
+			ext = img_url[img_url.rfind('.'):]
+			# print(img_url, name + ext)
+			# We do not want empty file names
+			if not name or name == "":
+				name = options["customFileName"]
+			name = name.replace(':', '-')
+
+			imgs.append(ImageData(img_url, name, ext, js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["data"]["id"]))
+		return imgs, errors
 
 
 def showSettings():
@@ -400,25 +502,29 @@ def showSettings():
 	print("\t2. Multi-threading")
 	print("\t3. Folders")
 	print("\t4. Duplicates")
-	print("\t5. Load defaults")
+	print("\t5. Debug options")
+	print("\t9. Load defaults")
 	print("\nCopyright (C) Jubiman 2021. All rights reserved. https://github.com/Jubiman/Pinterest-Board-Downloader/")
 	print("\t\nESC. Return to console")
 
-	k = getch()
-	if k == b"1":
+	k = ord(getch())
+	
+	if k == ord("1"):
 		return showFilenames()
-	elif k == b"2":
+	elif k == ord("2"):
 		return showMultithreading()
-	elif k == b"3":
+	elif k == ord("3"):
 		return showFolders()
-	elif k == b"4":
+	elif k == ord("4"):
 		return showDuplicates()
-	elif k == b"5":
+	elif k == ord("5"):
+		return showDebugOptions()
+	elif k == ord("9"):
 		print("Are you sure you want to reset to defaults? y/n")
-		k = getch()
-		if k in [b'y', b'Y']:
+		k = ord(getch())
+		if k in [ord('y'), ord('Y')]:
 			configDefaults()
-	elif k == b"\x08" or k == b"\x1b":
+	elif k == 0x08 or k == 0x1b:
 		cls()
 		return saveConfig()
 	return showSettings()
@@ -431,13 +537,13 @@ def showFilenames():
 		print(f"\t1. Custom file names\033[40G| [{options['FILENAMES']['customFileNames']}]")
 		print(f"\t2. Custom file name\033[40G| [{options['FILENAMES']['customFileName']}]")
 		print("\tESC. Back to main menu")
-		k = getch()
-		if k == b"1":
+		k = ord(getch())
+		if k == ord("1"):
 			options['FILENAMES']['customFileNames'] = str(not strtobool(options['FILENAMES']['customFileNames']))
-		elif k == b"2":
+		elif k == ord("2"):
 			val = input("New value:  ")
 			options['FILENAMES']['customFileName'] = val
-		elif k == b"\x08" or k == b"\x1b":
+		elif k == 0x08 or k == 0x1b:
 			cls()
 			return showSettings()
 		return showFilenames()
@@ -449,11 +555,11 @@ def showMultithreading():
 		print("Pinterest Board Downloader Settings\n")
 		print(f"\t1. Max workers (threads)\033[40G| [{options['MULTITHREADING']['mx_wrks']}]")
 		print("\tESC. Back to main menu")
-		k = getch()
-		if k == b"1":
+		k = ord(getch())
+		if k == ord("1"):
 			val = input("New value:  ")
 			options['MULTITHREADING']['mx_wrks'] = val
-		elif k == b"\x08" or k == b"\x1b":
+		elif k == 0x08 or k == 0x1b:
 			cls()
 			return showSettings()
 		return showMultithreading()
@@ -465,11 +571,11 @@ def showFolders():
 		print("Pinterest Board Downloader Settings\n")
 		print(f"\t1. Download folder\033[40G| [{options['FOLDERS']['saves']}]")
 		print("\tESC. Back to main menu")
-		k = getch()
-		if k == b"1":
+		k = ord(getch())
+		if k == ord("1"):
 			options['FOLDERS']['saves'] = filedialog.askdirectory(title="Select a local folder where you want to put "
 																		"all the pinned pictures")
-		elif k == b"\x08" or k == b"\x1b":
+		elif k == 0x08 or k == 0x1b:
 			cls()
 			return showSettings()
 		return showFolders()
@@ -483,21 +589,39 @@ def showDuplicates():
 		print(f"\t2. Save pin ID\033[40G| [{options['DUPLICATES']['savepinid']}]")
 		print(f"\t3. Efficiency mode\033[40G| [{options['DUPLICATES']['mode']}]")
 		print("\tESC. Back to main menu")
-		k = getch()
-		if k == b"1":
+		k = ord(getch())
+		if k == ord("1"):
 			options['DUPLICATES']['checkforduplicates'] = str(not strtobool(options['DUPLICATES']['checkforduplicates']))
-		elif k == b"2":
+		elif k == ord("2"):
 			options['DUPLICATES']['savepinid'] = str(not strtobool(options['DUPLICATES']['savepinid']))
-		elif k == b"3":
+		elif k == ord("3"):
 			if options['DUPLICATES']['mode'] == "speed":
 				options['DUPLICATES']['mode'] = "memory"
 				return showDuplicates()
 			options['DUPLICATES']['mode'] = "speed"
 			return showDuplicates()
-		elif k == b"\x08" or k == b"\x1b":
+		elif k == 0x08 or k == 0x1b:
 			cls()
 			return showSettings()
 		return showDuplicates()
+
+
+def showDebugOptions():
+	while True:
+		cls()
+		print("Pinterest Board Downloader Settings\n")
+		print(f"\t1. Log errors to error_logs.json\033[40G| [{options['DEBUG']['autologerrors']}]")
+		print(f"\t2. Automatically enable debug mode\033[40G| [{options['DEBUG']['autoenabledebug']}]")
+		print("\tESC. Back to main menu")
+		k = ord(getch())
+		if k == ord("1"):
+			options['DEBUG']['checkforduplicates'] = str(not strtobool(options['DEBUG']['autologerrors']))
+		elif k == ord("2"):
+			options['DEBUG']['autoenabledebug'] = str(not strtobool(options['DEBUG']['autoenabledebug']))
+		elif k == 0x08 or k == 0x1b:
+			cls()
+			return showSettings()
+		return showDebugOptions()
 
 
 def run():
@@ -508,7 +632,7 @@ def run():
 	global popup
 	while True:
 		inp = input("$>")
-		# inp = "dl https://pinterest.com/humanAF/art-n-stuff/ -f"  # DEBUG
+		# inp = "dl https://pinterest.com/humanAF/art-n-stuff/ -f -n"  # DEBUG
 		if inp.lower() == "settings":
 			showSettings()
 		if inp.lower() == "quit" or inp.lower() == "exit":
@@ -545,13 +669,15 @@ def run():
 
 			# TODO: add more stuff?
 			print(f"Starting operation: downloading board from {url}.\n\tArguments:\n\t\t-f FORCE {force}\n\t\t-d DEBUG {debug}"
-					f"\n\t\t-v VERBOSE {verbose}\n\t\t-n NO-DIR {popup}"
+					f"\n\t\t-v VERBOSE {verbose}\n\t\t-n NO-DIR {not popup}"
 					f"\n\tOptions:\n\t\tCheck for duplicates:\t{options['DUPLICATES']['checkforduplicates']}"
 					f"\n\t\tMode:\t\t\t{options['DUPLICATES']['mode']}"
 					f"\n\t\tDownload folder:\t\"{options['FOLDERS']['saves']}\"\n\t\tMax threads:\t\t{options['MULTITHREADING']['mx_wrks']}"
 					f"\n\t\tCustom filenames:\t{options['FILENAMES']['customfilenames']}")
+			if not os.path.isdir(options["FOLDERS"]["saves"]):
+				os.mkdir(options["FOLDERS"]["saves"])
 			if strtobool(options["DUPLICATES"]["savepinid"]):
-				open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "a").close()
+				open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "a+").close()
 			if options["DUPLICATES"]["mode"] == "speed":
 				with open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "r") as f:
 					pinids = f.read().splitlines()
@@ -560,13 +686,15 @@ def run():
 
 			gstart = time.time()
 			try:
-				request(url)
+				asyncio.run(request(url))
 			except IndexError:
-				pass
+				print_exc()
 			# except Exception as ex:
 				# print(f"Something failed: {ex}")
 			gend = time.time()
 			print(f"\nFinished operation! Took {datetime.timedelta(seconds=gend - gstart)} seconds.")
+		else:
+			print(f"Command not found.")
 
 
 def main():

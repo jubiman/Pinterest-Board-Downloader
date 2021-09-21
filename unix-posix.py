@@ -19,7 +19,6 @@ threads = {
 	"imgprops": [],
 	"download": []
 }
-images = []
 options = ConfigParser()
 debug = force = verbose = False
 cls = lambda: os.system('cls' if os.name in ('nt', 'dos') else 'clear')
@@ -28,10 +27,11 @@ popup = True
 
 
 class ImageData:
-	def __init__(self, url, name, ext):
+	def __init__(self, url, name, ext, iden):
 		self.url = url
 		self.name = name
 		self.ext = ext
+		self.id = iden
 
 
 def configDefaults():
@@ -116,10 +116,16 @@ def save(file, name, ext):
 		f.close()
 
 
-def downloadImg(url, name, ext):
+def downloadImg(url, name, ext, iden):
 	# TODO: add options
 	img = requests.get(url).content
 	save(img, name, ext)
+	if strtobool(options["DUPLICATES"]["savepinid"]):
+		with open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "r+") as f:
+			if iden not in f.read().splitlines():
+				f.write(iden)
+				f.write("\n")
+				f.close()
 
 
 def getImgPropsSpecial(pin):
@@ -171,7 +177,7 @@ def getImgPropsSpecial(pin):
 				name = options["customFileName"]
 			name = name.replace(':', '-')
 
-			return img_url, name, ext
+			return img_url, name, ext, pin["id"]
 
 
 def getImgProps(pin):
@@ -213,7 +219,6 @@ def getImgProps(pin):
 	except:
 		try:
 			name = js["resourceResponses"][0]["response"]["data"]["id"]
-			name = js["resourceResponses"][0]["response"]["data"]["id"]
 		except:
 			name = str(randint(0, 1024))
 	ext = img_url[img_url.rfind('.'):]
@@ -223,7 +228,7 @@ def getImgProps(pin):
 		name = options["customFileName"]
 	name = name.replace(':', '-')
 
-	return img_url, name, ext
+	return img_url, name, ext, pin["id"]
 
 
 def request(board):
@@ -328,6 +333,27 @@ def request(board):
 	max_workers = None if int(options['MULTITHREADING']['mx_wrks']) == 0 else int(options['MULTITHREADING']['mx_wrks'])
 
 	# Multi-threading
+	images = multithread(max_workers, pins)
+	generated = 0
+
+	# Multi-threading
+	downloaded = 0
+	with ThreadPoolExecutor(max_workers=max_workers) as ex:
+		print(f"Downloading images...")
+		start2 = time.time()
+		for image in images:
+			generated += 1
+			threads["download"].append(ex.submit(downloadImg, image.url, image.name, image.ext, image.id))
+
+		for task in as_completed(threads["download"]):
+			downloaded += 1
+		end2 = time.time()
+		print(f"Finished downloading {downloaded} images. Took {datetime.timedelta(seconds=end2 - start2)}")
+	end = time.time()
+	print(f"Finished generating {len(pins)} images: generated {generated} images. Took {datetime.timedelta(seconds=end-start)}")
+
+
+def multithread(max_workers, pins):
 	with ThreadPoolExecutor(max_workers=max_workers) as ex:
 		# Go through each pin
 		for pin in pins:
@@ -355,41 +381,17 @@ def request(board):
 							continue
 						f.close()
 
-			if strtobool(options["DUPLICATES"]["savepinid"]):
-				with open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "r+") as f:
-					if pin["id"] not in f.read().splitlines():
-						f.write(pin["id"])
-						f.write("\n")
-						f.close()
-
 			threads["imgprops"].append(ex.submit(getImgProps, pin))
 
 		for task in as_completed(threads["imgprops"]):
 			# If the function returned successfully we can download the image
 			if isinstance(task.result(), tuple):
 				if debug:
-					print(task.result()[0], task.result()[1] + task.result()[2])
-				images.append(ImageData(*task.result()))
-				continue
+					print(task.result()[0], task.result()[1] + task.result()[2], task.result()[3])
+				yield ImageData(*task.result())
+				continue  # Don't know if this is needed but will still do it
 			# The function failed to execute
 			print(task.result())
-	end = time.time()
-	print(f"Finished generating {len(pins)} images: generated {len(images)} images. Took {datetime.timedelta(seconds=end-start)}")
-
-	print(f"Downloading {len(images)} images...")
-	start = time.time()
-
-	# Multi-threading
-	with ThreadPoolExecutor(max_workers=max_workers) as ex:
-
-		for image in images:
-			threads["download"].append(ex.submit(downloadImg, image.url, image.name, image.ext))
-
-		for task in as_completed(threads["download"]):
-			# Nothing to do here yet; no return value
-			continue
-	end = time.time()
-	print(f"Finished downloading {len(images)} images. Took {datetime.timedelta(seconds=end-start)}")
 
 
 def showSettings():
@@ -504,7 +506,6 @@ def run():
 	global verbose
 	global pinids
 	global popup
-	global images
 	while True:
 		inp = input("$>")
 		# inp = "dl https://pinterest.com/humanAF/art-n-stuff/ -f"  # DEBUG
@@ -544,8 +545,10 @@ def run():
 
 			# TODO: add more stuff?
 			print(f"Starting operation: downloading board from {url}.\n\tArguments:\n\t\t-f FORCE {force}\n\t\t-d DEBUG {debug}"
-					f"\n\t\t-v VERBOSE {verbose}\n\tOptions:\n\t\tCheck for duplicates:\t{options['DUPLICATES']['checkforduplicates']}"
-					f"\n\t\tDownload folder:\t{options['FOLDERS']['saves']}\n\t\tMax threads:\t\t{options['MULTITHREADING']['mx_wrks']}"
+					f"\n\t\t-v VERBOSE {verbose}\n\t\t-n NO-DIR {popup}"
+					f"\n\tOptions:\n\t\tCheck for duplicates:\t{options['DUPLICATES']['checkforduplicates']}"
+					f"\n\t\tMode:\t\t\t{options['DUPLICATES']['mode']}"
+					f"\n\t\tDownload folder:\t\"{options['FOLDERS']['saves']}\"\n\t\tMax threads:\t\t{options['MULTITHREADING']['mx_wrks']}"
 					f"\n\t\tCustom filenames:\t{options['FILENAMES']['customfilenames']}")
 			if strtobool(options["DUPLICATES"]["savepinid"]):
 				open(os.path.join(options["FOLDERS"]["saves"], "pinids.txt"), "a").close()
@@ -554,8 +557,6 @@ def run():
 					pinids = f.read().splitlines()
 					f.close()
 			saveConfig()
-
-			images = []
 
 			gstart = time.time()
 			try:
