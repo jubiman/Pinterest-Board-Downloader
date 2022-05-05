@@ -167,7 +167,7 @@ def getImgPropsSpecial(pin):
 		for obj in pin["objects"][1:]:
 			pin_page = requests.get(f"https://pinterest.com/pin/{obj['id']}")
 
-			script = html.fromstring(pin_page.content).xpath('//script[@id="initial-state"]')
+			script = html.fromstring(pin_page.content).xpath('//script[@id="__PWS_DATA__"]')
 			js = json.loads(script[0].text)
 			if debug:
 				with open("a.json", "w") as f:
@@ -220,7 +220,7 @@ def getImgProps(pin):
 
 	pin_page = requests.get(f"https://pinterest.com/pin/{pin['id']}")
 
-	script = html.fromstring(pin_page.content).xpath('//script[@id="initial-state"]')
+	script = html.fromstring(pin_page.content).xpath('//script[@id="__PWS_DATA__')
 	js = json.loads(script[0].text)
 	if debug:
 		with open("a.json", "w") as f:
@@ -284,18 +284,19 @@ async def request(board):
 	# Get board ID
 	try:
 		page = requests.get(f"https://pinterest.com{source_url}")
-		script = html.fromstring(page.content).xpath('//script[@id="initial-state"]')
+		script = html.fromstring(page.content).xpath('//script[@id="__PWS_DATA__"]')
 		js = json.loads(script[0].text)
-		board_id = js["boards"][list(js["boards"])[0]]["id"]
+		board_id = js["props"]["initialReduxState"]["resources"]["BoardResource"][list(js["props"]["initialReduxState"]["resources"]["BoardResource"])[0]]["data"]["id"]
 		timestamp = int(time.time() * 1000)
 	except Exception as e:
 		print("Failed to get board information. Exitting.")
 		print_exc(chain=False)
 		return
 
+
 	url = 'https://pinterest.com/resource/BoardFeedResource/get/'
-	bookmark = js["resources"]["BoardFeedResource"][list(js["resources"]["BoardFeedResource"])[0]]["nextBookmark"]
-	pins = js["resources"]["BoardFeedResource"][list(js["resources"]["BoardFeedResource"])[0]]["data"]
+	bookmark = js["props"]["initialReduxState"]["resources"]["BoardFeedResource"][list(js["props"]["initialReduxState"]["resources"]["BoardFeedResource"])[0]]["nextBookmark"]
+	pins = js["props"]["initialReduxState"]["resources"]["BoardFeedResource"][list(js["props"]["initialReduxState"]["resources"]["BoardFeedResource"])[0]]["data"]
 
 	s = requests.Session()
 	s.headers = {
@@ -431,38 +432,39 @@ async def multithread(pins):
 		pin_pages = await asyncio.gather(*tasks)
 
 		for pin_page in pin_pages:
-			script = html.fromstring(pin_page.content).xpath('//script[@id="initial-state"]')
+			script = html.fromstring(pin_page.content).xpath('//script[@id="__PWS_DATA__"]')
 			js = json.loads(script[0].text)
 
 			with open("z.json", "w") as f:
 				f.write(json.dumps(js, indent=4, sort_keys=not not 1))
 			img_url = ""
-			if js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["error"] is not None:
+			if js["props"]["initialReduxState"]["resources"]["PinResource"][list(js["props"]["initialReduxState"]["resources"]["PinResource"])[0]]["data"] is None:
 				if debug:
 					with open("wtf.json", "w") as f:
 						f.write(json.dumps(js, indent=4, sort_keys=True))
 				if strtobool(options['DEBUG']['autologerrors']) or debug:
-					with open("error_logs.json", "a+", encoding="utf-8") as f:
-						msg = js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["error"]["message"][js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["error"]["message"].find('"')+1:]
+					with open("error_logs.json", "a+", encoding="utf-16") as f:
+						msg = js["props"]["initialReduxState"]["resources"]["PinResource"][list(js["props"]["initialReduxState"]["resources"]["PinResource"])[0]]["error"]["message"][js["props"]["initialReduxState"]["resources"]["PinResource"][list(js["props"]["initialReduxState"]["resources"]["PinResource"])[0]]["error"]["message"].find('"')+1:]
 						msg = msg.replace('\\"', '"')
 						msg = msg.replace('\\\\', '\\')
 						try:
 							js2 = json.loads(msg[:-1])
 						except:
 							print("Got an error while trying to load the error. Dumping json object to error_logs_error.json")
-							with open("error_logs_error.json", "a+") as f2:
-								f2.write(json.dumps(js, indent=4, sort_keys=True))
+							f.write(json.dumps(js, indent=4, sort_keys=True))
 						f.write(json.dumps(js2, indent=4, sort_keys=True, ensure_ascii=False))
-					print(f'Got an error while requesting {js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["error"]["path"]}.'
+					k = list(js["props"]["initialReduxState"]["resources"]["PinResource"])[0]
+					path = "https://pinterest.com/pin/" + k[k.find("id=")+4:-1]
+					print(f'Got an error while requesting {path}.'
 							f'\n{js2["code"]} - {js2["message"]}'
 							f'\nWrote the message object to error_logs.json')
 					errors += 1
 				continue
-			if ('videos' in js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["data"]) and js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["data"]['videos']:
+			if ('videos' in js["props"]["initialReduxState"]["resources"]["PinResource"][list(js["props"]["initialReduxState"]["resources"]["PinResource"])[0]]["data"]) and js["props"]["initialReduxState"]["resources"]["PinResource"][list(js["props"]["initialReduxState"]["resources"]["PinResource"])[0]]["data"]['videos']:
 				if debug:
 					with open("video.json", "w") as f:
 						f.write(json.dumps(js, indent=4, sort_keys=True))
-				v_d = js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["data"]['videos']['video_list']
+				v_d = js["props"]["initialReduxState"]["resources"]["PinResource"][list(js["props"]["initialReduxState"]["resources"]["PinResource"])[0]]["data"]['videos']['video_list']
 				vDimens = []
 				vDimensD = {}
 				for v_format, v_v in v_d.items():
@@ -476,13 +478,13 @@ async def multithread(pins):
 				if debug:
 					with open("x.json", "w") as f:
 						f.write(json.dumps(js, indent=4, sort_keys=True))
-				img_url = js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["data"]["images"]["orig"]["url"]
+				img_url = js["props"]["initialReduxState"]["resources"]["PinResource"][list(js["props"]["initialReduxState"]["resources"]["PinResource"])[0]]["data"]["images"]["orig"]["url"]
 			try:
 				name = dateConversion(
-					js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["data"]["created_at"])  # ????? not works on 1 fsr
+					js["props"]["initialReduxState"]["resources"]["PinResource"][list(js["props"]["initialReduxState"]["resources"]["PinResource"])[0]]["data"]["created_at"])  # ????? not works on 1 fsr
 			except:
 				try:
-					name = js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["data"]["id"]
+					name = js["props"]["initialReduxState"]["resources"]["PinResource"][list(js["props"]["initialReduxState"]["resources"]["PinResource"])[0]]["data"]["id"]
 				except:
 					name = str(randint(0, 1024))
 			ext = img_url[img_url.rfind('.'):]
@@ -492,7 +494,7 @@ async def multithread(pins):
 				name = options["customFileName"]
 			name = name.replace(':', '-')
 
-			imgs.append(ImageData(img_url, name, ext, js["resources"]["PinResource"][list(js["resources"]["PinResource"])[0]]["data"]["id"]))
+			imgs.append(ImageData(img_url, name, ext, js["props"]["initialReduxState"]["resources"]["PinResource"][list(js["props"]["initialReduxState"]["resources"]["PinResource"])[0]]["data"]["id"]))
 		return imgs, errors
 
 
@@ -631,8 +633,8 @@ def run():
 	global pinids
 	global popup
 	while True:
-		inp = input("$>")
-		# inp = "dl https://pinterest.com/humanAF/art-n-stuff/ -f -n"  # DEBUG
+		# inp = input("$>")
+		inp = "dl https://pinterest.com/humanAF/art-n-stuff/ -f -n -d"  # DEBUG
 		if inp.lower() == "settings":
 			showSettings()
 		if inp.lower() == "quit" or inp.lower() == "exit":
