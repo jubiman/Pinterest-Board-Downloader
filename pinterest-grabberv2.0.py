@@ -633,8 +633,8 @@ def run():
 	global pinids
 	global popup
 	while True:
-		# inp = input("$>")
-		inp = "dl https://pinterest.com/humanAF/art-n-stuff/ -f -n -d"  # DEBUG
+		inp = input("$>")
+		# inp = "dl https://pinterest.com/humanAF/art-n-stuff/ -f -n -d"  # DEBUG
 		if inp.lower() == "settings":
 			showSettings()
 		if inp.lower() == "quit" or inp.lower() == "exit":
