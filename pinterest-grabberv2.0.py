@@ -626,6 +626,18 @@ def showDebugOptions():
 		return showDebugOptions()
 
 
+def showHelp():
+	print("Available commands:")
+	print(" help - display this help")
+	print(" download|dl - download a pinterest board")
+	print("\tusage: dl https://pinterest.com/<user_name>/<board_name> <-f> <-n> <-d> <-v>")
+	print("\toptions:")
+	print("\t\t -f|--force\tOverwrite existing images")
+	print("\t\t -n|--no-dir\tDon't get the select folder popup")
+	print("\t\t -d|--debug\tShow debug messages")
+	print("\t\t -v|--verbose\tBe more verbose (probably useless)")
+
+
 def run():
 	global debug
 	global force
@@ -639,6 +651,8 @@ def run():
 			showSettings()
 		if inp.lower() == "quit" or inp.lower() == "exit":
 			sys.exit(0)
+		if inp.lower() in ["help", "?"]:
+			showHelp()
 		s = inp.split()
 		if s[0] in ["download", 'dl']:
 			url = s[1]
