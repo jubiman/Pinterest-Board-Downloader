@@ -649,10 +649,12 @@ def run():
 		# inp = "dl https://pinterest.com/humanAF/art-n-stuff/ -f -n -d"  # DEBUG
 		if inp.lower() == "settings":
 			showSettings()
+			continue
 		if inp.lower() == "quit" or inp.lower() == "exit":
 			sys.exit(0)
 		if inp.lower() in ["help", "?"]:
 			showHelp()
+			continue
 		s = inp.split()
 		if s[0] in ["download", 'dl']:
 			url = s[1]
@@ -709,8 +711,7 @@ def run():
 				# print(f"Something failed: {ex}")
 			gend = time.time()
 			print(f"\nFinished operation! Took {datetime.timedelta(seconds=gend - gstart)} seconds.")
-		else:
-			print(f"Command not found.")
+		print(f"Command not found.")
 
 
 def main():
